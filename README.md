@@ -4,14 +4,15 @@ Assessment using spring mvc, security and data
 
 Steps for deployment
 
-Run the database.sql script file in mysql database. - This script will create new schema, tables and load default users and lookup data.
+1.  Run the database.sql script file in mysql database. - This script will create new schema, tables and load default users and lookup data.
 
-Goto application.properties (src\main\resources\application.properties)  change database credentials.
+2.  Open application.properties (src\main\resources\application.properties)  change database credentials.
 
-Build the project using maven. 
+3.  Build the project using maven. 
 
-Copy the war file to tomcat server.
+4.  Copy the war file to tomcat server.
 
+5.  Admin user credentails :- admin@test.com/admin
 
 Note:
 
