@@ -1,0 +1,136 @@
+WireMock Spring Boot Sidecar Application
+This document contains all the necessary code and instructions to create a WireMock Spring Boot application, containerize it with Docker, and deploy it as a sidecar container in an AWS ECS task.
+
+1. Project Dependencies (pom.xml)
+This Maven pom.xml file includes the necessary dependencies to build a Spring Boot web application that embeds a standalone WireMock server.
+
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="[http://maven.apache.org/POM/4.0.0](http://maven.apache.org/POM/4.0.0)" xmlns:xsi="[http://www.w3.org/2001/XMLSchema-instance](http://www.w3.org/2001/XMLSchema-instance)"
+    xsi:schemaLocation="[http://maven.apache.org/POM/4.0.0](http://maven.apache.org/POM/4.0.0) [https://maven.apache.org/xsd/maven-4.0.0.xsd](https://maven.apache.org/xsd/maven-4.0.0.xsd)">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.1.4</version>
+        <relativePath/> <!-- lookup parent from repository -->
+    </parent>
+    <groupId>com.example</groupId>
+    <artifactId>wiremock-application</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>wiremock-application</name>
+    <description>Demo project for WireMock on ECS</description>
+
+    <properties>
+        <java.version>17</java.version>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>3.5.2</version>
+            <scope>compile</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
+
+2. Spring Boot Application (WiremockApplication.java)
+This is the main application class. It uses a CommandLineRunner to start the embedded WireMock server on application startup and registers a shutdown hook to stop it gracefully.
+
+package com.example.wiremockapplication;
+
+import com.github.tomakehurst.wiremock.WireMockServer;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+
+import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
+import static com.github.tomakehurst.wiremock.client.WireMock.*;
+
+@SpringBootApplication
+public class WiremockApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(WiremockApplication.class, args);
+    }
+
+    @Bean
+    public CommandLineRunner runWireMockServer() {
+        return (args) -> {
+            // Configure WireMock to listen on port 8080
+            WireMockServer wireMockServer = new WireMockServer(options().port(8080));
+            
+            // Start the server
+            wireMockServer.start();
+
+            // Example Stubbing: Define a simple mock response for a GET request
+            wireMockServer.stubFor(get(urlEqualTo("/api/my-service/hello"))
+                    .willReturn(aResponse()
+                            .withStatus(200)
+                            .withHeader("Content-Type", "text/plain")
+                            .withBody("Hello from the WireMock sidecar!")));
+
+            // To dynamically load stubs from a directory, uncomment the line below
+            // Note: You would need to mount a volume to this directory in your ECS task definition.
+            // wireMockServer.loadMappingsFrom("src/main/resources/mappings");
+
+            System.out.println("WireMock server started successfully on port 8080.");
+            
+            // Register a shutdown hook to stop the server gracefully
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                wireMockServer.stop();
+                System.out.println("WireMock server has been stopped.");
+            }));
+        };
+    }
+}
+
+3. Dockerfile
+This Dockerfile is used to create a lightweight Docker image for the Spring Boot application, which is a required step for deployment to ECS.
+
+# Use a lightweight OpenJDK base image
+FROM eclipse-temurin:17-jre-focal
+
+# Set the working directory inside the container
+WORKDIR /app
+
+# Copy the built JAR file from your local machine to the container's working directory
+# The JAR file is typically located in your project's 'target' directory after running 'mvn package'
+COPY target/wiremock-application-0.0.1-SNAPSHOT.jar app.jar
+
+# Expose the port that the Spring Boot application (and WireMock) listens on
+EXPOSE 8080
+
+# Define the command to run the application when the container starts
+ENTRYPOINT ["java", "-jar", "app.jar"]
+
+4. Building and Deploying to ECS as a Sidecar
+To deploy this application as a sidecar, you will add it as a secondary container to your existing ECS Task Definition.
+
+Build the Docker Image:
+First, navigate to your project directory and run the following command to build the Docker image.
+
+docker build -t wiremock-application .
+
+Tag and Push to ECR:
+Next, tag the image with your ECR repository URI and push it to the registry. Replace <your-account-id> and <your-region> with your AWS details.
+
+docker tag wiremock-application:latest <your-account-id>.dkr.ecr.<your-region>[.amazonaws.com/wiremock-application:latest](https://.amazonaws.com/wiremock-application:latest)
+docker push <your-account-id>.dkr.ecr.<your-region>[.amazonaws.com/wiremock-application:latest](https://.amazonaws.com/wiremock-application:latest)
+
+Update ECS Task Definition:
+Finally, go to the AWS ECS console and update your Task Definition. Add a new container definition for the WireMock sidecar, pointing to the image you just pushed. Ensure both containers share the same network mode (e.g., awsvpc) so they can communicate via localhost.
