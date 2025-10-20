@@ -1,0 +1,38 @@
+services:
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:latest
+    ports:
+      # Expose the HTTPS port, not the old HTTP port
+      - "8083:8083"
+    environment:
+      # --- Basic Connect Config ---
+      CONNECT_BOOTSTRAP_SERVERS: "kafka-broker:9092"
+      CONNECT_REST_ADVERTISED_HOST_NAME: "my-kafka-connect.example.com" # Use your cert's CN
+      CONNECT_GROUP_ID: "connect-cluster"
+      CONNECT_CONFIG_STORAGE_TOPIC: "_connect-configs"
+      CONNECT_OFFSET_STORAGE_TOPIC: "_connect-offsets"
+      CONNECT_STATUS_STORAGE_TOPIC: "_connect-status"
+      CONNECT_KEY_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      CONNECT_VALUE_CONVERTER: "org.apache.kafka.connect.json.JsonConverter"
+      
+      # --- HTTPS/SSL Configuration ---
+      CONNECT_LISTENERS: "https://0.0.0.0:8083"
+      CONNECT_REST_ADVERTISED_LISTENER: "https"
+      
+      # --- SSL Keystore Config ---
+      # Path INSIDE the container where the keystore will be mounted
+      CONNECT_SSL_KEYSTORE_LOCATION: "/etc/kafka/secrets/kafka-connect.jks" 
+      CONNECT_SSL_KEYSTORE_PASSWORD: "mypassword"
+      CONNECT_SSL_KEY_PASSWORD: "mypassword"
+      
+      # (Optional) For mTLS, where clients must also present a cert
+      # CONNECT_SSL_CLIENT_AUTH: "required" 
+      # CONNECT_SSL_TRUSTSTORE_LOCATION: "/etc/kafka/secrets/kafka-connect.truststore.jks"
+      # CONNECT_SSL_TRUSTSTORE_PASSWORD: "truststorepassword"
+
+    volumes:
+      # Mount your newly created JKS file to the path specified in the environment variables
+      - /path/on/your/host/kafka-connect.jks:/etc/kafka/secrets/kafka-connect.jks
+      
+      # (Optional) Mount a truststore if using mTLS
+      # - /path/on/your/host/kafka-connect.truststore.jks:/etc/kafka/secrets/kafka-connect.truststore.jks
