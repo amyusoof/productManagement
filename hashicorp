@@ -1,0 +1,116 @@
+Vault Agent is a client-side daemon (a background service) that acts as an intermediary between your applications and a HashiCorp Vault server.
+
+Its primary purpose is to simplify application integration with Vault. Instead of your application needing complex logic to authenticate, manage token lifecycles (renewal), and fetch secrets, the Agent handles all of this. The application simply reads its secrets from a file, as if it were a static configuration.
+
+
+
+This is especially useful for legacy applications that cannot be modified or for standardizing how all your applications (regardless of language) interact with Vault.
+
+Key Features
+Vault Agent's functionality is built around two core features: Auto-Auth and Templating.
+
+1. Auto-Auth (Token Management)
+This feature automates the process of authenticating to Vault and managing the resulting token.
+
+Authentication: The Agent uses a machine-oriented auth method (like Kubernetes, AWS IAM, GCP GCE, or AppRole) to prove its identity to Vault and receive a token.
+
+Token Renewal: It automatically renews the token before it expires, ensuring the application always has a valid token.
+
+Token Sink: After getting the token, the Agent "sinks" it (writes it) to a configured location, typically a file on disk (e.g., /run/secrets/vault-token). Your application can then read this token from the file if it needs to make its own calls to Vault.
+
+2. Secret Templating
+This is the most powerful feature for non-Vault-aware applications. The Agent uses a built-in consul-template engine to fetch secrets and render them into configuration files.
+
+Renders Templates: You create a template file (e.g., config.ctmpl). The Agent fetches the secrets it needs (like a database password) and renders them into a plain text configuration file (e.g., config.ini).
+
+Dynamic Updates: The Agent watches the secrets for changes. If a secret is rotated in Vault (e.g., the database password changes), the Agent automatically re-renders the configuration file with the new value.
+
+Reloads Services: You can configure the Agent to run a command (e.g., systemctl reload nginx) after it updates a file, allowing services to pick up new credentials without a full restart.
+
+Implementation Overview
+Implementation involves running the vault agent process with a configuration file, typically written in HCL (HashiCorp Configuration Language).
+
+Here is a high-level overview of a configuration file and what each part does.
+
+Terraform
+
+# 1. Define the Vault server address
+# This can also be set via the VAULT_ADDR environment variable.
+vault {
+  address = "https://vault.my-company.com:8200"
+}
+
+# 2. Configure Auto-Auth
+# This tells the Agent HOW to log in.
+auto_auth {
+  # Use the Kubernetes auth method
+  method "kubernetes" {
+    mount_path = "auth/kubernetes"
+    config = {
+      role = "my-app-role"
+    }
+  }
+
+  # 3. Configure the Token Sink
+  # This tells the Agent WHERE to write the token.
+  sink "file" {
+    config = {
+      path = "/vault/secrets/vault-token"
+      mode = 0640 # Set file permissions
+    }
+  }
+}
+
+# 4. Configure Caching
+# Optional, but recommended to reduce load on Vault.
+cache {
+  use_auto_auth_token = true
+}
+
+# 5. Configure Templating (Optional)
+# This tells the Agent WHAT secrets to get and WHERE to write them.
+template {
+  # Source: The path to your template file
+  source      = "/etc/templates/config.ctmpl"
+  
+  # Destination: The path to the final rendered config file
+  destination = "/etc/my-app/config.ini"
+  
+  # Optional: Command to run after the file is updated
+  command     = "systemctl reload my-app"
+}
+Example Template File (/etc/templates/config.ctmpl)
+The template file might look something like this:
+
+Ini, TOML
+
+[database]
+# Use 'with' to fetch a secret. Agent gets this path from Vault.
+{{ with secret "database/creds/my-app-role" }}
+username = "{{ .Data.username }}"
+password = "{{ .Data.password }}"
+{{ end }}
+When the Agent runs, it will:
+
+Authenticate using the Kubernetes role my-app-role.
+
+Write the token it receives to /vault/secrets/vault-token.
+
+Fetch the secret from database/creds/my-app-role.
+
+Render the final /etc/my-app/config.ini file:
+
+Ini, TOML
+
+[database]
+username = "db-user-123"
+password = "a-super-secret-password"
+Run systemctl reload my-app to tell the app to read its new config.
+
+Common Use Cases
+
+
+Kubernetes (Sidecar Pattern): This is the most common use case. The Vault Agent runs as a sidecar container in the same Pod as your application. They share a memory volume (emptyDir). The Agent authenticates using the Pod's Service Account Token, fetches secrets, and writes them to the shared volume, where your main application container can read them. This is often automated by the Vault Agent Injector, which automatically adds the sidecar to your Pods based on annotations.
+
+
+Virtual Machines (AWS/GCP/Azure): The Agent runs as a system service (e.g., systemd) on the VM. It uses the VM's built-in identity (e.g., an AWS IAM Role) to authenticate to Vault. It then renders configuration files (like database.conf) that are used by applications (like Nginx or a custom service) running on that same VM.
